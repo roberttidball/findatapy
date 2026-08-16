@@ -69,6 +69,13 @@ class DataVendorFXMacroData(DataVendor):
 
     def _download_fx_pair(self, md_request, ticker, fields):
         base, quote = self._split_pair(ticker)
+        supported_fields = {"open", "high", "low", "close"}
+        unsupported_fields = set(fields) - supported_fields
+        if unsupported_fields:
+            raise ValueError(
+                "FXMacroData supports these fields: "
+                + ", ".join(sorted(supported_fields))
+            )
         constants = DataConstants()
         url = (
             f"{constants.fxmacrodata_base_url}/forex/"
@@ -77,38 +84,67 @@ class DataVendorFXMacroData(DataVendor):
         params = {
             "start_date": self._format_date(md_request.start_date),
             "end_date": self._format_date(md_request.finish_date),
+            "limit": 100,
+            "offset": 0,
         }
 
         if md_request.fxmacrodata_api_key:
             params["api_key"] = md_request.fxmacrodata_api_key
 
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        rows = response.json().get("data", [])
+        rows = []
+        while True:
+            try:
+                response = requests.get(url, params=params, timeout=30)
+            except requests.RequestException as exc:
+                raise RuntimeError("FXMacroData request failed") from exc
+            if not response.ok:
+                raise RuntimeError(
+                    "FXMacroData returned HTTP " + str(response.status_code)
+                )
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise ValueError("FXMacroData returned invalid JSON") from exc
+            page = payload.get("data", []) if isinstance(payload, dict) else []
+            if not isinstance(page, list):
+                raise ValueError("FXMacroData response data must be a list")
+            rows.extend(row for row in page if isinstance(row, dict))
+            if len(page) < params["limit"]:
+                break
+            params["offset"] += params["limit"]
 
         if len(rows) == 0:
             return None
 
         data_frame = pd.DataFrame(rows)
+        if "date" not in data_frame or "val" not in data_frame:
+            raise ValueError("FXMacroData response is missing date or val")
         data_frame["Date"] = pd.to_datetime(data_frame["date"])
-        data_frame = data_frame.set_index("Date").sort_index()
+        data_frame = (
+            data_frame.dropna(subset=["Date", "val"])
+            .drop_duplicates(subset=["Date"], keep="first")
+            .set_index("Date")
+            .sort_index()
+        )
 
         field_map = {}
 
         for field in fields:
-            field_map[field] = (
-                data_frame["val"]
-                if field in ["open", "high", "low", "close"]
-                else data_frame.get(field)
-            )
+            if field in data_frame:
+                field_map[field] = pd.to_numeric(
+                    data_frame[field], errors="coerce")
+            else:
+                field_map[field] = pd.to_numeric(
+                    data_frame["val"], errors="coerce")
 
-        return pd.DataFrame(field_map, index=data_frame.index)
+        return pd.DataFrame(field_map, index=data_frame.index).dropna(how="all")
 
     @staticmethod
     def _split_pair(ticker):
         clean_ticker = ticker.replace("/", "").replace("-", "").upper()
 
-        if len(clean_ticker) != 6:
+        if (len(clean_ticker) != 6 or not clean_ticker.isalpha()
+                or not clean_ticker.isascii()):
             raise ValueError(
                 "FXMacroData tickers should be six-letter FX pairs "
                 "such as EURUSD"
