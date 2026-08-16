@@ -277,8 +277,10 @@ class DataConstants(object):
     fxcm_api_key = "x"
 
     #######  FXMacroData settings
-    fxmacrodata_base_url = "https://fxmacrodata.com/api/v1"
-    fxmacrodata_api_key = key_store("FXMacroData")
+    fxmacrodata_base_url = "https://api.fxmacrodata.com/v1"
+    fxmacrodata_api_key = (key_store("FXMacroData") or
+                           os.environ.get("FXMACRODATA_API_KEY") or
+                           os.environ.get("FXMD_API_KEY"))
 
     #######  Eikon settings
     eikon_api_key = key_store("Eikon")
