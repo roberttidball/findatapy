@@ -17,9 +17,10 @@ class _FakeResponse:
 def test_fxmacrodata_vendor_builds_daily_fx_dataframe(monkeypatch):
     calls = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, headers=None, timeout=None):
         calls["url"] = url
-        calls["params"] = params
+        calls["params"] = dict(params)
+        calls["headers"] = headers
         calls["timeout"] = timeout
 
         return _FakeResponse({
@@ -49,13 +50,17 @@ def test_fxmacrodata_vendor_builds_daily_fx_dataframe(monkeypatch):
         "EURUSD.open", "EURUSD.high", "EURUSD.low", "EURUSD.close"]
     assert data_frame.loc[pd.Timestamp("2026-01-02"), "EURUSD.close"] == 1.10
     assert calls["url"] == "https://api.fxmacrodata.com/v1/forex/eur/usd"
-    assert calls["params"]["api_key"] == "test-key"
+    assert calls["headers"] == {"X-API-Key": "test-key"}
+    assert "api_key" not in calls["params"]
     assert calls["params"]["start_date"] == "2026-01-01"
     assert calls["params"]["end_date"] == "2026-01-04"
 
 
 def test_fxmacrodata_vendor_preserves_reference_ohlc(monkeypatch):
-    def fake_get(url, params=None, timeout=None):
+    calls = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls["headers"] = headers
         return _FakeResponse({
             "data": [{
                 "date": "2026-01-02",
@@ -76,10 +81,12 @@ def test_fxmacrodata_vendor_preserves_reference_ohlc(monkeypatch):
         finish_date="2026-01-04",
         tickers=["EURUSD"],
         fields=["open", "high", "low", "close"],
+        fxmacrodata_api_key="",
     )
 
     data_frame = DataVendorFXMacroData().load_ticker(md_request)
 
+    assert calls["headers"] == {}
     row = data_frame.loc[pd.Timestamp("2026-01-02")]
     assert row.to_dict() == {
         "EURUSD.open": 1.09,

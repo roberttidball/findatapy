@@ -88,13 +88,15 @@ class DataVendorFXMacroData(DataVendor):
             "offset": 0,
         }
 
+        headers = {}
         if md_request.fxmacrodata_api_key:
-            params["api_key"] = md_request.fxmacrodata_api_key
+            headers["X-API-Key"] = md_request.fxmacrodata_api_key
 
         rows = []
         while True:
             try:
-                response = requests.get(url, params=params, timeout=30)
+                response = requests.get(
+                    url, params=params, headers=headers, timeout=30)
             except requests.RequestException as exc:
                 raise RuntimeError("FXMacroData request failed") from exc
             if not response.ok:
